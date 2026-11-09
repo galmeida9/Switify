@@ -58,6 +58,7 @@ jobs:
         with:
           name: Switify-Overlay
           path: phase2/dist_engine/
+          include-hidden-files: true
 
       - uses: actions/upload-artifact@v4
         with:
