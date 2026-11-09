@@ -1,0 +1,69 @@
+name: Build overlay package
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  overlay:
+    runs-on: ubuntu-latest
+    container: devkitpro/devkita64:latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install host build tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends cmake ninja-build g++ zip
+
+      - name: Toolchain versions
+        run: |
+          aarch64-none-elf-gcc --version | head -n1
+          cmake --version | head -n1
+
+      - name: Host-side service core tests
+        run: |
+          mkdir -p phase2/build_host
+          g++ -std=c++20 -O2 -Wall -Wextra -Werror -Iphase2/common/include \
+            phase2/common/source/service_core.cpp \
+            phase2/tests/service_core_tests.cpp \
+            -o phase2/build_host/service-core-tests
+          phase2/build_host/service-core-tests
+
+      - name: Build background service
+        run: |
+          cmake -S phase2/sysmodule -B phase2/build_engine -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE=$DEVKITPRO/cmake/Switch.cmake \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.13
+          ninja -C phase2/build_engine switify-background-package
+
+      - name: Build overlay
+        run: make -C phase2/overlay -j"$(nproc)" TARGET=switify-overlay BUILD=build
+
+      - name: Stage SD card layout
+        run: |
+          dist=phase2/dist_engine
+          rm -rf "$dist"
+          mkdir -p "$dist/atmosphere/contents/4200000000535754" "$dist/switch/.overlays"
+          cp phase2/build_engine/switify-background.nsp \
+            "$dist/atmosphere/contents/4200000000535754/exefs.nsp"
+          cp phase2/sysmodule/toolbox.json \
+            "$dist/atmosphere/contents/4200000000535754/toolbox.json"
+          cp phase2/overlay/switify-overlay.ovl "$dist/switch/.overlays/Switify.ovl"
+          find "$dist" -type f -exec ls -l {} \;
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Switify-Overlay
+          path: phase2/dist_engine/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Switify-Overlay-symbols
+          path: |
+            phase2/build_engine/switify-background.elf
+            phase2/build_engine/switify-background
+            phase2/overlay/switify-overlay.elf
+          if-no-files-found: ignore
